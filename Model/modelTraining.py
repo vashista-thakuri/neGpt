@@ -2,10 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Read the text file
+with open("Data\cleaned_data.txt", "r", encoding="utf-8") as f:
+        data = f.read()
+
 # Hyperparameters
 batch_size = 64 
 block_size = 256 
-max_iters = 5000 
+max_iters = 6000 
 eval_interval = 500 
 learning_rate = 3e-4 
 device = 'cuda' if torch.cuda.is_available() else 'cpu' 
@@ -17,27 +21,26 @@ dropout = 0.2
 # ------------
 
 class ModelTrainer:
-    def __init__(self, data):
-        torch.manual_seed(1337)
-        self.text = data
+    def __init__(self):
 
+        torch.manual_seed(1337) # For reproducibility
+        self.text = data
         self.chars = sorted(list(set(self.text)))
         self.vocab_size = len(self.chars)
-
-        print(self.vocab_size)
-
         self.stoi = {ch: i for i, ch in enumerate(self.chars)}
         self.itos = {i: ch for i, ch in enumerate(self.chars)}
-        self.encode = lambda s: [self.stoi[c] for c in s]
-        self.decode = lambda l: ''.join([self.itos[i] for i in l])
-
+        self.encode = lambda s: [self.stoi[c] for c in s] # Encoding function
+        self.decode = lambda l: ''.join([self.itos[i] for i in l]) # Decoding function
         data = torch.tensor(self.encode(self.text), dtype=torch.long)
+        
+        # 90% of the data for training and 10% for validation
         n = int(0.9 * len(data))
         self.train_data = data[:n]
         self.val_data = data[n:]
 
+        # Model initialization
         self.model = vCustomModel(self.vocab_size).to(device)
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate) # Using AdamW optimizer
 
     def get_batch(self, split):
         data = self.train_data if split == 'train' else self.val_data
@@ -60,7 +63,7 @@ class ModelTrainer:
         self.model.train()
         return out
 
-    def train(self):
+    def train(self, model_path):
         for iter in range(max_iters):
             if iter % eval_interval == 0:
                 losses = self.estimate_loss()
@@ -73,6 +76,10 @@ class ModelTrainer:
             self.optimizer.zero_grad(set_to_none=True)
             loss.backward()  # Backpropagation
             self.optimizer.step()
+        torch.save(self.model.state_dict(), "neGpt_weights.pth") # Save the model weights
+        print("Model Weights saved to neGpt_weights.pth")
+        torch.save(self.model, model_path)
+        print(f"Model saved weights to {model_path}") # Save the full model
 
     def generate_text(self, max_new_tokens=10000):
         context = torch.zeros((1, 1), dtype=torch.long, device=device)
@@ -87,14 +94,14 @@ class Head(nn.Module):
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout) # Dropout layer for regularization
 
     def forward(self, x):
         B, T, C = x.shape
         k = self.key(x)
         q = self.query(x)
         wei = q @ k.transpose(-2, -1) * C**-0.5
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # Masking future tokens
         wei = F.softmax(wei, dim=-1)
         wei = self.dropout(wei)
         v = self.value(x)
@@ -120,7 +127,7 @@ class FeedForward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
+            nn.ReLU(), 
             nn.Linear(4 * n_embd, n_embd),
             nn.Dropout(dropout),
         )
